@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import {
+  deleteRecurringExpenseRow,
+  deleteTransactionsByRecurringId,
+  insertRecurringExpenseRow,
+  insertTransactionRows,
+  listRecurringExpenses,
+  updateRecurringExpenseRow,
+} from '../lib/demoStore'
 import { generateRecurringDates, todayISO, type RecurrenceFrequency } from '../lib/dates'
 import type { RecurringExpense } from '../types'
 
@@ -22,6 +29,7 @@ function materializedRows(recurringId: string, input: RecurringExpenseInput, fro
       amount: input.amount,
       description: input.name || null,
       category_id: input.category_id,
+      recurrence_group_id: null,
       recurring_expense_id: recurringId,
     }))
 }
@@ -32,12 +40,7 @@ export function useRecurringExpenses(refreshTransactions: () => Promise<void>) {
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('recurring_expenses')
-      .select('*')
-      .order('start_date', { ascending: true })
-    if (error) console.error(error)
-    setRecurringExpenses(data ?? [])
+    setRecurringExpenses(listRecurringExpenses())
     setLoading(false)
   }, [])
 
@@ -46,13 +49,9 @@ export function useRecurringExpenses(refreshTransactions: () => Promise<void>) {
   }, [refresh])
 
   const createRecurringExpense = async (input: RecurringExpenseInput) => {
-    const { data, error } = await supabase.from('recurring_expenses').insert(input).select().single()
-    if (error) throw error
-    const rows = materializedRows(data.id, input, input.start_date)
-    if (rows.length) {
-      const { error: insErr } = await supabase.from('transactions').insert(rows)
-      if (insErr) throw insErr
-    }
+    const row = insertRecurringExpenseRow(input)
+    const rows = materializedRows(row.id, input, input.start_date)
+    if (rows.length) insertTransactionRows(rows)
     await refresh()
     await refreshTransactions()
   }
@@ -60,31 +59,18 @@ export function useRecurringExpenses(refreshTransactions: () => Promise<void>) {
   const updateRecurringExpense = async (id: string, input: RecurringExpenseInput, scope: RecurringEditScope) => {
     const fromDate = scope === 'future' ? todayISO() : input.start_date
 
-    let del = supabase.from('transactions').delete().eq('recurring_expense_id', id)
-    if (scope === 'future') del = del.gte('date', todayISO())
-    const { error: delErr } = await del
-    if (delErr) throw delErr
-
-    const { error: updErr } = await supabase.from('recurring_expenses').update(input).eq('id', id)
-    if (updErr) throw updErr
+    deleteTransactionsByRecurringId(id, scope === 'future' ? todayISO() : undefined)
+    updateRecurringExpenseRow(id, input)
 
     const rows = materializedRows(id, input, fromDate)
-    if (rows.length) {
-      const { error: insErr } = await supabase.from('transactions').insert(rows)
-      if (insErr) throw insErr
-    }
+    if (rows.length) insertTransactionRows(rows)
     await refresh()
     await refreshTransactions()
   }
 
   const deleteRecurringExpense = async (id: string, scope: RecurringEditScope) => {
-    let del = supabase.from('transactions').delete().eq('recurring_expense_id', id)
-    if (scope === 'future') del = del.gte('date', todayISO())
-    const { error: delErr } = await del
-    if (delErr) throw delErr
-
-    const { error } = await supabase.from('recurring_expenses').delete().eq('id', id)
-    if (error) throw error
+    deleteTransactionsByRecurringId(id, scope === 'future' ? todayISO() : undefined)
+    deleteRecurringExpenseRow(id)
     await refresh()
     await refreshTransactions()
   }

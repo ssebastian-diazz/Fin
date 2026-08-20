@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import {
+  deleteTransactionRow,
+  insertTransactionRow,
+  listTransactionsInRange,
+  updateTransactionRow,
+} from '../lib/demoStore'
 import type { Transaction } from '../types'
 
 export interface NewTransactionInput {
@@ -15,14 +20,7 @@ export function useTransactions(rangeStart: string, rangeEnd: string) {
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .gte('date', rangeStart)
-      .lte('date', rangeEnd)
-      .order('date', { ascending: true })
-    if (error) console.error(error)
-    setTransactions(data ?? [])
+    setTransactions(listTransactionsInRange(rangeStart, rangeEnd))
     setLoading(false)
   }, [rangeStart, rangeEnd])
 
@@ -31,19 +29,19 @@ export function useTransactions(rangeStart: string, rangeEnd: string) {
   }, [refresh])
 
   const addTransaction = async (t: NewTransactionInput) => {
-    const { error } = await supabase.from('transactions').insert({
+    insertTransactionRow({
       date: t.date,
       amount: t.amount,
       description: t.description || null,
       category_id: t.category_id,
+      recurrence_group_id: null,
+      recurring_expense_id: null,
     })
-    if (error) throw error
     await refresh()
   }
 
   const updateTransaction = async (id: string, patch: Partial<Transaction>) => {
-    const { error } = await supabase.from('transactions').update(patch).eq('id', id)
-    if (error) throw error
+    updateTransactionRow(id, patch)
     await refresh()
   }
 
@@ -52,8 +50,7 @@ export function useTransactions(rangeStart: string, rangeEnd: string) {
   }
 
   const deleteTransaction = async (id: string) => {
-    const { error } = await supabase.from('transactions').delete().eq('id', id)
-    if (error) throw error
+    deleteTransactionRow(id)
     await refresh()
   }
 

@@ -3,12 +3,12 @@
 Demo pública de una app de finanzas personales de un solo usuario: un "libro
 mayor en T" que se navega por día, semana o mes, con saldo corrido real,
 recurrentes, y una pestaña de estadísticas con desglose por categoría y
-fijo-vs-variable. Frontend en React + Vite + Tailwind, backend en Supabase
-(Postgres real).
+fijo-vs-variable. Frontend en React + Vite + Tailwind.
 
-**Los datos que ves en la demo son ficticios**, generados por `demo_seed.sql`
-sobre un proyecto de Supabase separado, solo para este propósito — no hay
-datos personales reales en este repositorio ni en el backend que usa.
+**Esta demo no tiene backend.** Los datos que ves son ficticios y se generan
+y guardan en el `localStorage` de tu propio navegador la primera vez que
+cargas la página — cada visitante ve su propia copia, editable, que no
+persiste entre visitantes ni dispositivos y no se envía a ningún servidor.
 
 ## Uso
 
@@ -28,23 +28,15 @@ datos personales reales en este repositorio ni en el backend que usa.
 
 ## Correr este proyecto localmente
 
-1. Crea un proyecto en https://supabase.com (gratis).
-2. **SQL Editor** → pega y corre `schema.sql` (crea las tablas, funciones de
-   semana natural, vista de saldo diario, y categorías de ejemplo).
-3. Opcional, para poblarlo con los mismos datos ficticios que la demo: corre
-   también `demo_seed.sql` en el mismo editor (después de `schema.sql`, en un
-   proyecto que no sea el tuyo real — genera meses de movimientos relativos a
-   la fecha actual).
-4. **Settings → API** → copia `Project URL` y la `anon`/`publishable` key.
-
 ```bash
 npm install
-cp .env.example .env
-# pega tu Project URL y key en .env
 npm run dev
 ```
 
-Abre `http://localhost:5173`.
+Abre `http://localhost:5173`. Al primer load se siembran datos ficticios en
+`localStorage`; bórralos desde las herramientas de desarrollador del
+navegador (`localStorage.removeItem('fintrack-demo-v1')`) para reiniciar la
+demo desde cero.
 
 **Nota sobre el saldo inicial:** el saldo corrido suma todas las
 transacciones desde el principio. Para arrancar desde cero, registra una
@@ -53,15 +45,7 @@ quieras usar como punto de partida.
 
 ## Publicar en GitHub Pages
 
-1. En el repo: **Settings → Secrets and variables → Actions**, agrega
-   `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY`.
-2. **Settings → Pages** → fuente "GitHub Actions".
-3. Si el repo no se llama `FinTrack`, edita `base` en `vite.config.ts` para
+1. **Settings → Pages** → fuente "GitHub Actions".
+2. Si el repo no se llama `FinTrack`, edita `base` en `vite.config.ts` para
    que coincida (`/tu-repo/`).
-4. Push a `main` — `.github/workflows/deploy.yml` construye y despliega.
-
-**Nota de seguridad:** la `anon`/`publishable` key es segura de exponer en un
-frontend, pero como esta app no tiene login, cualquiera con la URL puede
-leer y escribir en el proyecto de Supabase al que apunte. Por eso esta demo
-usa un proyecto separado sembrado con datos ficticios — nunca apuntes un
-despliegue público a un proyecto con datos reales.
+3. Push a `main` — `.github/workflows/deploy.yml` construye y despliega.
