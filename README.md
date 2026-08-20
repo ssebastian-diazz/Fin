@@ -1,7 +1,6 @@
-# FinTrack — libro mayor personal
+# FinTrack — App personal de finanzas
 
-Demo pública de una app de finanzas personales de un solo usuario: un "libro
-mayor en T" que se navega por día, semana o mes, con saldo corrido real,
+Demo pública de una app de finanzas personales de un solo usuario (single-user). Se se navega por día, semana o mes, con saldo corrido real,
 recurrentes, y una pestaña de estadísticas con desglose por categoría y
 fijo-vs-variable. Frontend en React + Vite + Tailwind.
 
