@@ -198,6 +198,37 @@ function PagedChips({
   )
 }
 
+/** Como PagedChips pero sin paginado: se renderizan todas las transacciones
+ * de corrido, sin recorte ni scroll propio, así que la columna que la
+ * contiene crece con el contenido en vez de ciclar páginas con una flecha. */
+function ChipStack({
+  transactions,
+  catById,
+  onEditTransaction,
+  onMove,
+  className = '',
+}: {
+  transactions: Transaction[]
+  catById: Map<string, Category>
+  onEditTransaction: (tx: Transaction) => void
+  onMove: (id: string, newDate: string) => void
+  className?: string
+}) {
+  return (
+    <div className={className}>
+      {transactions.map((tx) => (
+        <TxChip
+          key={tx.id}
+          tx={tx}
+          cat={catById.get(tx.category_id ?? '')}
+          onEdit={() => onEditTransaction(tx)}
+          onMove={(dir) => onMove(tx.id, shiftISO(tx.date, dir))}
+        />
+      ))}
+    </div>
+  )
+}
+
 function aggregateByCategory(transactions: Transaction[], matches: (amount: number) => boolean) {
   const map = new Map<string, { catId: string | null; total: number }>()
   for (const t of transactions) {
@@ -209,6 +240,17 @@ function aggregateByCategory(transactions: Transaction[], matches: (amount: numb
     map.set(key, cur)
   }
   return [...map.values()].sort((a, b) => Math.abs(b.total) - Math.abs(a.total))
+}
+
+/** Transacciones agrupadas por categoría (mismo orden que `rows`, de mayor a
+ * menor total) y, dentro de cada categoría, por monto de mayor a menor —
+ * nunca mezcladas entre categorías. */
+function sortByCategoryOrder(rows: { catId: string | null; total: number }[], transactions: Transaction[]) {
+  return rows.flatMap((r) =>
+    transactions
+      .filter((t) => t.category_id === r.catId)
+      .sort((a, b) => Math.abs(Number(b.amount)) - Math.abs(Number(a.amount)))
+  )
 }
 
 interface WeekData {
@@ -385,6 +427,16 @@ function WeekColumn({
   // En modo calor las filas internas dejan su propio fondo opaco para que el
   // tinte de "qué tan fuerte fue la semana" se vea de corrido en todo el recuadro.
   const rowBgClass = heatMode ? '' : 'bg-panel'
+  // Igual que el desglose particular del anillo: agrupadas por categoría (la
+  // de mayor total primero) y, dentro de cada una, por monto de mayor a menor.
+  const sortedIncome = useMemo(
+    () => sortByCategoryOrder(aggregateByCategory(week.income, () => true), week.income),
+    [week.income]
+  )
+  const sortedExpenses = useMemo(
+    () => sortByCategoryOrder(aggregateByCategory(week.expenses, () => true), week.expenses),
+    [week.expenses]
+  )
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -473,21 +525,19 @@ function WeekColumn({
         />
       ) : (
         <>
-          <PagedChips
-            transactions={week.income}
+          <ChipStack
+            transactions={sortedIncome}
             catById={catById}
             onEditTransaction={onEditTransaction}
             onMove={onMove}
-            minHeightPx={26}
             className={`px-1 pt-1 ${rowBgClass}`}
           />
           <div className="shrink-0 border-t border-line-soft" />
-          <PagedChips
-            transactions={week.expenses}
+          <ChipStack
+            transactions={sortedExpenses}
             catById={catById}
             onEditTransaction={onEditTransaction}
             onMove={onMove}
-            minHeightPx={26}
             className={`px-1 pt-1 pb-1 ${rowBgClass}`}
           />
         </>
@@ -671,15 +721,7 @@ function CategoryRingBlock({
 }) {
   // Mismo orden de categoría que la leyenda del anillo (por total desc); dentro
   // de cada categoría, por monto de mayor a menor — nunca mezcladas entre sí.
-  const sortedTx = useMemo(
-    () =>
-      rows.flatMap((r) =>
-        transactions
-          .filter((t) => t.category_id === r.catId)
-          .sort((a, b) => Math.abs(Number(b.amount)) - Math.abs(Number(a.amount)))
-      ),
-    [rows, transactions]
-  )
+  const sortedTx = useMemo(() => sortByCategoryOrder(rows, transactions), [rows, transactions])
 
   return (
     <div>
@@ -1247,12 +1289,17 @@ export function Ledger({
   // del timeline desde cualquier punto de la página (no solo sobre la tabla).
   // Requiere un listener nativo con passive:false para poder frenar el scroll
   // vertical de la página (React adjunta onWheel como pasivo). Se excluyen las
-  // listas con scroll vertical propio (ej. el modal de categorías).
+  // listas con scroll vertical propio (ej. el modal de categorías) y, cuando
+  // una semana con muchas transacciones hace crecer la fila más alto que el
+  // viewport, se deja el scroll vertical nativo (la fila ya es scrolleable
+  // por sí sola gracias al overflow-x-auto, que implícitamente vuelve auto
+  // también el overflow-y) en vez de forzarlo a horizontal.
   useEffect(() => {
     function onWheel(e: WheelEvent) {
       const el = scrollRef.current
       if (!el) return
       if ((e.target as HTMLElement | null)?.closest('.overflow-y-auto')) return
+      if (el.scrollHeight > el.clientHeight) return
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
       if (delta === 0) return
       e.preventDefault()
