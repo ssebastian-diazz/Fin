@@ -259,6 +259,10 @@ function MonthSummaryColumn({
   const netChange = closing - opening
   const pctChange = opening !== 0 ? (netChange / Math.abs(opening)) * 100 : null
   const netChangePositive = netChange >= 0
+  // Oculto por defecto: la lista completa de categorías empuja el balance
+  // mensual fuera de la vista sin scrollear. Colapsado deja el anillo y el
+  // Total de cada lado, que ya dicen lo esencial de un vistazo.
+  const [showDetail, setShowDetail] = useState(false)
 
   return (
     <div
@@ -268,11 +272,30 @@ function MonthSummaryColumn({
       <div className="font-data text-xs font-semibold text-ink-soft text-center tabular-nums pt-1.5 pb-1">
         {money(opening)}
       </div>
+      <button
+        onClick={() => setShowDetail((v) => !v)}
+        aria-expanded={showDetail}
+        className="shrink-0 w-full flex items-center justify-center gap-1 py-1 text-[10px] font-semibold text-ink-faint uppercase tracking-[0.06em] hover:text-ink transition-colors border-t border-line-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+      >
+        {showDetail ? 'Ocultar detalle' : 'Ver detalle'}
+        <ChevronDown
+          size={10}
+          strokeWidth={2.4}
+          className={`transition-transform duration-200 ${showDetail ? 'rotate-180' : ''}`}
+        />
+      </button>
       <div className="px-1.5 py-1.5 min-h-[22px]">
         {incomeRows.length === 0 ? (
           <p className="text-xs text-ink-faint italic text-center py-1">Sin ingresos</p>
         ) : (
-          <CategoryRingLegend rows={incomeRows} total={incomeTotal} tone="income" catById={catById} layout="column" />
+          <CategoryRingLegend
+            rows={incomeRows}
+            total={incomeTotal}
+            tone="income"
+            catById={catById}
+            layout="column"
+            showCategoryRows={showDetail}
+          />
         )}
       </div>
       <div className="border-t border-line-soft" />
@@ -280,7 +303,14 @@ function MonthSummaryColumn({
         {expenseRows.length === 0 ? (
           <p className="text-xs text-ink-faint italic text-center py-1">Sin gastos</p>
         ) : (
-          <CategoryRingLegend rows={expenseRows} total={expenseTotal} tone="expense" catById={catById} layout="column" />
+          <CategoryRingLegend
+            rows={expenseRows}
+            total={expenseTotal}
+            tone="expense"
+            catById={catById}
+            layout="column"
+            showCategoryRows={showDetail}
+          />
         )}
       </div>
       <div className="shrink-0 border-t border-line-soft px-1.5 py-1.5 space-y-0.5">
@@ -561,6 +591,7 @@ function CategoryRingLegend({
   tone,
   catById,
   layout = 'row',
+  showCategoryRows = true,
 }: {
   rows: { catId: string | null; total: number }[]
   total: number
@@ -571,32 +602,42 @@ function CategoryRingLegend({
    * — para columnas angostas como el mes colapsado, donde lado a lado no le
    * deja aire al texto. */
   layout?: 'row' | 'column'
+  /** Si es falso, oculta la lista fila-por-categoría y deja sólo el anillo y
+   * el Total — para el mes colapsado, donde la lista completa empuja el
+   * balance mensual fuera de la vista. Con la lista oculta el Total se
+   * muestra siempre (aunque haya una sola categoría), porque pasa a ser el
+   * único número visible. */
+  showCategoryRows?: boolean
 }) {
   // `total` (pasado por quien llama) ya viene en absoluto, para normalizar el
   // anillo. La suma total que se muestra debe conservar el signo real.
   const signedTotal = rows.reduce((acc, r) => acc + r.total, 0)
+  const showTotal = !showCategoryRows || rows.length > 1
 
   return (
     <div className={layout === 'row' ? 'flex items-center gap-2.5' : 'flex flex-col items-center gap-2'}>
       <CategoryRing rows={rows} total={total} catById={catById} />
       <div className={layout === 'row' ? 'flex-1 min-w-0 space-y-1' : 'w-full min-w-0 space-y-1'}>
-        {rows.map((r) => {
-          const pct = total > 0 ? Math.round((Math.abs(r.total) / total) * 100) : 0
-          const cat = r.catId ? catById.get(r.catId) : undefined
-          return (
-            <div key={r.catId ?? '__none__'} className="flex items-center gap-1.5 min-w-0">
-              <CategoryDot cat={cat} />
-              <span className={`text-[11px] truncate flex-1 ${cat ? 'text-ink-soft' : 'text-ink-faint italic'}`}>
-                {pct}% {cat ? cat.name : 'Sin cat.'}
-              </span>
-              <span className={`font-data text-[11px] tabular-nums shrink-0 ${tone === 'income' ? 'text-income' : 'text-expense'}`}>
-                {money(r.total)}
-              </span>
-            </div>
-          )
-        })}
-        {rows.length > 1 && (
-          <div className="flex items-center gap-1.5 min-w-0 pt-1 mt-0.5 border-t border-line-soft/70">
+        {showCategoryRows &&
+          rows.map((r) => {
+            const pct = total > 0 ? Math.round((Math.abs(r.total) / total) * 100) : 0
+            const cat = r.catId ? catById.get(r.catId) : undefined
+            return (
+              <div key={r.catId ?? '__none__'} className="flex items-center gap-1.5 min-w-0">
+                <CategoryDot cat={cat} />
+                <span className={`text-[11px] truncate flex-1 ${cat ? 'text-ink-soft' : 'text-ink-faint italic'}`}>
+                  {pct}% {cat ? cat.name : 'Sin cat.'}
+                </span>
+                <span className={`font-data text-[11px] tabular-nums shrink-0 ${tone === 'income' ? 'text-income' : 'text-expense'}`}>
+                  {money(r.total)}
+                </span>
+              </div>
+            )
+          })}
+        {showTotal && (
+          <div
+            className={`flex items-center gap-1.5 min-w-0 ${showCategoryRows ? 'pt-1 mt-0.5 border-t border-line-soft/70' : ''}`}
+          >
             <span className="text-[11px] font-semibold text-ink-soft flex-1">Total</span>
             <span className={`font-data text-[11px] font-semibold tabular-nums shrink-0 ${tone === 'income' ? 'text-income' : 'text-expense'}`}>
               {money(signedTotal)}
