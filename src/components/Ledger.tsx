@@ -254,6 +254,11 @@ function MonthSummaryColumn({
   const incomeTotal = useMemo(() => incomeRows.reduce((acc, r) => acc + Math.abs(r.total), 0), [incomeRows])
   const expenseTotal = useMemo(() => expenseRows.reduce((acc, r) => acc + Math.abs(r.total), 0), [expenseRows])
   const positive = closing >= 0
+  // Cuánto se movió el saldo este mes, en neto y en porcentaje contra el
+  // saldo con el que abrió — sin saldo inicial (mes en $0) el % no dice nada.
+  const netChange = closing - opening
+  const pctChange = opening !== 0 ? (netChange / Math.abs(opening)) * 100 : null
+  const netChangePositive = netChange >= 0
 
   return (
     <div
@@ -278,12 +283,34 @@ function MonthSummaryColumn({
           <CategoryRingLegend rows={expenseRows} total={expenseTotal} tone="expense" catById={catById} layout="column" />
         )}
       </div>
-      <div
-        className={`shrink-0 font-data text-xs text-center tabular-nums py-1 border-t border-line-soft font-semibold ${
-          positive ? 'text-accent' : 'text-danger'
-        }`}
-      >
-        {money(closing)}
+      <div className="shrink-0 border-t border-line-soft px-1.5 py-1.5 space-y-0.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-ink-soft">Saldo inicial</span>
+          <span className="font-data text-[11px] tabular-nums text-ink-soft shrink-0">{money(opening)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-ink-soft">Ingresos</span>
+          <span className="font-data text-[11px] tabular-nums text-income shrink-0">+{money(incomeTotal)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-ink-soft">Gastos</span>
+          <span className="font-data text-[11px] tabular-nums text-expense shrink-0">-{money(expenseTotal)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-2 pt-1 mt-0.5 border-t border-line-soft/70">
+          <span className="text-[11px] font-semibold text-ink-soft">Saldo mensual</span>
+          <span
+            className={`font-data text-[11px] font-semibold tabular-nums shrink-0 ${positive ? 'text-accent' : 'text-danger'}`}
+          >
+            {money(closing)}
+          </span>
+        </div>
+        <div
+          className={`text-right font-data text-[10px] tabular-nums ${netChangePositive ? 'text-accent' : 'text-danger'}`}
+        >
+          ({pctChange !== null ? `${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(1)}% · ` : ''}
+          {netChangePositive ? '+' : ''}
+          {money(netChange)})
+        </div>
       </div>
     </div>
   )
@@ -545,6 +572,10 @@ function CategoryRingLegend({
    * deja aire al texto. */
   layout?: 'row' | 'column'
 }) {
+  // `total` (pasado por quien llama) ya viene en absoluto, para normalizar el
+  // anillo. La suma total que se muestra debe conservar el signo real.
+  const signedTotal = rows.reduce((acc, r) => acc + r.total, 0)
+
   return (
     <div className={layout === 'row' ? 'flex items-center gap-2.5' : 'flex flex-col items-center gap-2'}>
       <CategoryRing rows={rows} total={total} catById={catById} />
@@ -564,6 +595,14 @@ function CategoryRingLegend({
             </div>
           )
         })}
+        {rows.length > 1 && (
+          <div className="flex items-center gap-1.5 min-w-0 pt-1 mt-0.5 border-t border-line-soft/70">
+            <span className="text-[11px] font-semibold text-ink-soft flex-1">Total</span>
+            <span className={`font-data text-[11px] font-semibold tabular-nums shrink-0 ${tone === 'income' ? 'text-income' : 'text-expense'}`}>
+              {money(signedTotal)}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   )
