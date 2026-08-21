@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Maximize2, Minimize2, Plus } from 'lucide-react'
 import type { Category, Transaction } from '../types'
 import { heatBackground } from '../lib/color'
+import { useEscapeClose } from '../hooks/useEscapeClose'
 import {
   addDays,
   addMonths,
@@ -23,6 +24,7 @@ export const LEFT_BOUND = '2026-01-01'
 export const BASE_RIGHT_YEAR = 2027
 const WEEK_COL_WIDTH = 116
 const DAY_COL_WIDTH = 92
+const DAY_COL_EXPANDED_WIDTH = 260
 const MONTH_SUMMARY_WIDTH = 208
 
 /** Punto de color de la categoría: el mismo lenguaje que ya usan Categorías, Recurrentes y Estadísticas. */
@@ -228,6 +230,9 @@ interface WeekData {
   expenses: Transaction[]
   opening: number
   net: number
+  /** Igual que `net` pero sin recurrentes — sólo para el modo "gastos relativos": los
+   * recurrentes (renta, sueldo) son esperados y dominarían el tinte sin aportar nada al análisis. */
+  heatNet: number
   closing: number
 }
 
@@ -323,14 +328,15 @@ function WeekColumn({
   monthMaxAbsWeekNet: number
 }) {
   // En modo calor el subtotal de abajo dejar de ser el saldo acumulado y pasa
-  // a ser únicamente el balance de la semana (lo mismo que colorea el recuadro).
-  const bottomValue = heatMode ? week.net : week.closing
+  // a ser únicamente el balance de la semana sin recurrentes (lo mismo que
+  // colorea el recuadro — ver `heatNet` en WeekData).
+  const bottomValue = heatMode ? week.heatNet : week.closing
   const positive = bottomValue >= 0
   const startDay = parseISO(week.start).getUTCDate()
   const endDay = parseISO(week.end).getUTCDate()
   const rangeLabel = startDay === endDay ? String(startDay) : `${startDay}–${endDay}`
   const [dragOver, setDragOver] = useState(false)
-  const heatBg = heatMode ? heatBackground(week.net, monthMaxAbsWeekNet) : undefined
+  const heatBg = heatMode ? heatBackground(week.heatNet, monthMaxAbsWeekNet) : undefined
   // En modo calor las filas internas dejan su propio fondo opaco para que el
   // tinte de "qué tan fuerte fue la semana" se vea de corrido en todo el recuadro.
   const rowBgClass = heatMode ? '' : 'bg-panel'
@@ -410,12 +416,217 @@ function WeekColumn({
   )
 }
 
+/** Anillo SVG: un arco grueso sin relleno por categoría, largo proporcional a
+ * su parte del total. Sin librería de gráficas — sólo círculos apilados con
+ * stroke-dasharray, cada uno rotado al punto donde termina el anterior. */
+function CategoryRing({
+  rows,
+  total,
+  catById,
+}: {
+  rows: { catId: string | null; total: number }[]
+  total: number
+  catById: Map<string, Category>
+}) {
+  const size = 84
+  const strokeWidth = 15
+  const radius = (size - strokeWidth) / 2
+  const circumference = 2 * Math.PI * radius
+  let acc = 0
+
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      className="shrink-0"
+      style={{ transform: 'rotate(-90deg)' }}
+      aria-hidden="true"
+    >
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--color-line-soft)" strokeWidth={strokeWidth} />
+      {rows.map((r) => {
+        const pct = total > 0 ? Math.abs(r.total) / total : 0
+        const segLen = pct * circumference
+        const dashoffset = -acc
+        acc += segLen
+        return (
+          <circle
+            key={r.catId ?? '__none__'}
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke={r.catId ? (catById.get(r.catId)?.bg_color ?? 'var(--color-ink-faint)') : 'var(--color-ink-faint)'}
+            strokeWidth={strokeWidth}
+            strokeDasharray={`${segLen} ${circumference - segLen}`}
+            strokeDashoffset={dashoffset}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
+/** Una transacción dentro del desglose particular: descripción a la izquierda,
+ * monto a la derecha — clic para editarla, igual que el resto de la app. */
+function TxDetailRow({
+  tx,
+  cat,
+  onEdit,
+}: {
+  tx: Transaction
+  cat: Category | undefined
+  onEdit: () => void
+}) {
+  const amountClass = tx.amount >= 0 ? 'text-income' : 'text-expense'
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      title={tx.description || undefined}
+      className="w-full flex items-center gap-1.5 min-w-0 text-left rounded-none hover:bg-panel-raised transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+    >
+      <CategoryDot cat={cat} />
+      <span className="text-[11px] truncate flex-1 text-ink-soft">{tx.description || 'Sin descripción'}</span>
+      <span className={`font-data text-[11px] tabular-nums shrink-0 ${amountClass}`}>{money(tx.amount)}</span>
+    </button>
+  )
+}
+
+/** Anillo + leyenda de una sola dirección (ingresos o gastos) del día, cada
+ * fila con su porcentaje del total, categoría y monto — ej. "50% Renta ($5,000)" —
+ * y debajo, el desglose particular: cada transacción con su descripción y monto. */
+function CategoryRingBlock({
+  label,
+  rows,
+  transactions,
+  total,
+  tone,
+  catById,
+  onEditTransaction,
+}: {
+  label: string
+  rows: { catId: string | null; total: number }[]
+  transactions: Transaction[]
+  total: number
+  tone: 'income' | 'expense'
+  catById: Map<string, Category>
+  onEditTransaction: (tx: Transaction) => void
+}) {
+  // Mismo orden de categoría que la leyenda del anillo (por total desc); dentro
+  // de cada categoría, por monto de mayor a menor — nunca mezcladas entre sí.
+  const sortedTx = useMemo(
+    () =>
+      rows.flatMap((r) =>
+        transactions
+          .filter((t) => t.category_id === r.catId)
+          .sort((a, b) => Math.abs(Number(b.amount)) - Math.abs(Number(a.amount)))
+      ),
+    [rows, transactions]
+  )
+
+  return (
+    <div>
+      <h3 className="text-[9px] font-semibold text-ink-faint uppercase tracking-[0.06em] mb-1.5">{label}</h3>
+      <div className="flex items-center gap-2.5">
+        <CategoryRing rows={rows} total={total} catById={catById} />
+        <div className="flex-1 min-w-0 space-y-1">
+          {rows.map((r) => {
+            const pct = total > 0 ? Math.round((Math.abs(r.total) / total) * 100) : 0
+            const cat = r.catId ? catById.get(r.catId) : undefined
+            return (
+              <div key={r.catId ?? '__none__'} className="flex items-center gap-1.5 min-w-0">
+                <CategoryDot cat={cat} />
+                <span className={`text-[11px] truncate flex-1 ${cat ? 'text-ink-soft' : 'text-ink-faint italic'}`}>
+                  {pct}% {cat ? cat.name : 'Sin cat.'}
+                </span>
+                <span className={`font-data text-[11px] tabular-nums shrink-0 ${tone === 'income' ? 'text-income' : 'text-expense'}`}>
+                  {money(r.total)}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      {sortedTx.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-line-soft/70 space-y-0.5">
+          {sortedTx.map((tx) => (
+            <TxDetailRow
+              key={tx.id}
+              tx={tx}
+              cat={catById.get(tx.category_id ?? '')}
+              onEdit={() => onEditTransaction(tx)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Contenido de un día ampliado: en vez de la lista de transacciones, un
+ * anillo por categoría (ingresos y/o gastos) — el desglose proporcional del
+ * día de un vistazo — y debajo, el desglose particular por transacción. */
+function DayExpandedContent({
+  income,
+  expenses,
+  catById,
+  onEditTransaction,
+}: {
+  income: Transaction[]
+  expenses: Transaction[]
+  catById: Map<string, Category>
+  onEditTransaction: (tx: Transaction) => void
+}) {
+  const incomeByCat = useMemo(() => aggregateByCategory(income, () => true), [income])
+  const expenseByCat = useMemo(() => aggregateByCategory(expenses, () => true), [expenses])
+  const incomeTotal = useMemo(() => incomeByCat.reduce((acc, r) => acc + Math.abs(r.total), 0), [incomeByCat])
+  const expenseTotal = useMemo(() => expenseByCat.reduce((acc, r) => acc + Math.abs(r.total), 0), [expenseByCat])
+
+  if (incomeByCat.length === 0 && expenseByCat.length === 0) {
+    return (
+      <div className="flex-1 min-h-0 flex items-center justify-center px-2">
+        <p className="text-xs text-ink-faint italic text-center">Sin movimientos.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto px-2 pt-1.5 pb-2 space-y-4">
+      {incomeByCat.length > 0 && (
+        <CategoryRingBlock
+          label="Ingresos"
+          rows={incomeByCat}
+          transactions={income}
+          total={incomeTotal}
+          tone="income"
+          catById={catById}
+          onEditTransaction={onEditTransaction}
+        />
+      )}
+      {expenseByCat.length > 0 && (
+        <CategoryRingBlock
+          label="Gastos"
+          rows={expenseByCat}
+          transactions={expenses}
+          total={expenseTotal}
+          tone="expense"
+          catById={catById}
+          onEditTransaction={onEditTransaction}
+        />
+      )}
+    </div>
+  )
+}
+
 /** Semana desplegada por día: la misma T, pero cada día de lunes a domingo es su propia columna angosta. */
 interface DayStats {
   opening: number
   incomeTotal: number
   expenseTotal: number
   net: number
+  /** Igual que `net` pero sin recurrentes — ver `heatNet` en WeekData. */
+  heatNet: number
   closing: number
 }
 
@@ -471,14 +682,29 @@ function DayBreakout({
       const expenseTotal = dayTx.filter((t) => Number(t.amount) < 0).reduce((acc, t) => acc + Number(t.amount), 0)
       const opening = running
       const net = incomeTotal + expenseTotal
+      const heatNet = dayTx
+        .filter((t) => !t.recurring_expense_id)
+        .reduce((acc, t) => acc + Number(t.amount), 0)
       const closing = opening + net
       running = closing
-      map.set(d, { opening, incomeTotal, expenseTotal, net, closing })
+      map.set(d, { opening, incomeTotal, expenseTotal, net, heatNet, closing })
     }
     return map
   }, [days, byDay, week.opening])
 
   const [dragOverDay, setDragOverDay] = useState<string | null>(null)
+  // Varios días pueden ampliarse a la vez, cada uno independiente del resto.
+  const [expandedDays, setExpandedDays] = useState<Set<string>>(new Set())
+  useEscapeClose(expandedDays.size > 0, () => setExpandedDays(new Set()))
+
+  function toggleExpanded(d: string) {
+    setExpandedDays((cur) => {
+      const next = new Set(cur)
+      if (next.has(d)) next.delete(d)
+      else next.add(d)
+      return next
+    })
+  }
 
   return (
     <div
@@ -508,18 +734,24 @@ function DayBreakout({
           const stats = dayStats.get(d)!
           // En modo calor el subtotal de abajo deja de ser el saldo acumulado
           // (y su desglose ingreso/gasto) y pasa a ser únicamente el balance
-          // del día — lo mismo que colorea el recuadro.
-          const bottomValue = heatMode ? stats.net : stats.closing
+          // del día sin recurrentes — lo mismo que colorea el recuadro.
+          const bottomValue = heatMode ? stats.heatNet : stats.closing
           const dayPositive = bottomValue >= 0
           const showDragTint = dragOverDay === d
-          const heatBg = heatMode ? heatBackground(stats.net, monthMaxAbsDayNet) : undefined
+          const isExpanded = expandedDays.has(d)
+          const heatBg = heatMode && !isExpanded ? heatBackground(stats.heatNet, monthMaxAbsDayNet) : undefined
           return (
             <div
               key={d}
-              className={`group relative shrink-0 self-stretch flex flex-col border-l border-line-soft first:border-l-0 transition-colors ${
+              className={`group relative shrink-0 self-stretch flex flex-col border-l border-line-soft first:border-l-0 transition-[width,background-color] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
                 showDragTint ? 'bg-accent-dim/40' : !heatMode && isToday ? 'bg-now' : ''
-              } ${heatMode && isToday ? 'ring-1 ring-inset ring-ink-faint' : ''}`}
-              style={{ width: DAY_COL_WIDTH, backgroundColor: !showDragTint ? heatBg : undefined }}
+              } ${heatMode && isToday ? 'ring-1 ring-inset ring-ink-faint' : ''} ${
+                isExpanded ? 'bg-panel shadow-[inset_0_0_0_1px_var(--color-accent)] z-[1]' : ''
+              }`}
+              style={{
+                width: isExpanded ? DAY_COL_EXPANDED_WIDTH : DAY_COL_WIDTH,
+                backgroundColor: !showDragTint ? heatBg : undefined,
+              }}
               onDragOver={(e) => {
                 e.preventDefault()
                 setDragOverDay(d)
@@ -541,12 +773,34 @@ function DayBreakout({
               >
                 <Plus size={11} strokeWidth={2.6} />
               </button>
+              {!isExpanded && (
+                <button
+                  onClick={() => toggleExpanded(d)}
+                  title="Ver el día completo"
+                  aria-label={`Ver todas las transacciones del ${shortWeekdayLabel(parseISO(d))} ${d.slice(8, 10)}`}
+                  className="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full bg-panel-raised border border-line flex items-center justify-center text-ink-faint opacity-0 group-hover:opacity-100 hover:text-accent hover:border-accent transition-all focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                >
+                  <Maximize2 size={11} strokeWidth={2.6} />
+                </button>
+              )}
               <div
-                className={`shrink-0 text-center py-1 border-b border-line-soft ${isToday ? 'font-bold text-ink' : 'text-ink-faint'}`}
+                className={`shrink-0 flex items-center py-1 border-b border-line-soft ${
+                  isExpanded ? 'justify-between pl-2 pr-1' : 'justify-center'
+                } ${isToday ? 'font-bold text-ink' : 'text-ink-faint'}`}
               >
                 <span className="font-data text-xs tabular-nums uppercase">
                   {shortWeekdayLabel(parseISO(d))} {d.slice(8, 10)}
                 </span>
+                {isExpanded && (
+                  <button
+                    onClick={() => toggleExpanded(d)}
+                    title="Cerrar"
+                    aria-label={`Cerrar el detalle del ${shortWeekdayLabel(parseISO(d))} ${d.slice(8, 10)}`}
+                    className="flex items-center justify-center w-6 h-6 text-ink-faint hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                  >
+                    <Minimize2 size={11} strokeWidth={2.6} />
+                  </button>
+                )}
               </div>
               <div
                 title="Saldo inicial del día"
@@ -554,23 +808,34 @@ function DayBreakout({
               >
                 {money(stats.opening)}
               </div>
-              <PagedChips
-                transactions={income}
-                catById={catById}
-                onEditTransaction={onEditTransaction}
-                onMove={onMove}
-                minHeightPx={24}
-                className="px-1 pt-1"
-              />
-              <div className="shrink-0 border-t border-line-soft/70" />
-              <PagedChips
-                transactions={expenses}
-                catById={catById}
-                onEditTransaction={onEditTransaction}
-                onMove={onMove}
-                minHeightPx={24}
-                className="px-1 pt-1 pb-1"
-              />
+              {isExpanded ? (
+                <DayExpandedContent
+                  income={income}
+                  expenses={expenses}
+                  catById={catById}
+                  onEditTransaction={onEditTransaction}
+                />
+              ) : (
+                <>
+                  <PagedChips
+                    transactions={income}
+                    catById={catById}
+                    onEditTransaction={onEditTransaction}
+                    onMove={onMove}
+                    minHeightPx={24}
+                    className="px-1 pt-1"
+                  />
+                  <div className="shrink-0 border-t border-line-soft/70" />
+                  <PagedChips
+                    transactions={expenses}
+                    catById={catById}
+                    onEditTransaction={onEditTransaction}
+                    onMove={onMove}
+                    minHeightPx={24}
+                    className="px-1 pt-1 pb-1"
+                  />
+                </>
+              )}
               <div className="shrink-0 border-t border-line-soft/70 px-1 pt-1 pb-1 space-y-0.5">
                 {!heatMode && (
                   <div className="flex items-center justify-between gap-1 font-data text-[9px] tabular-nums">
@@ -637,10 +902,11 @@ function MonthBlock({
     if (!heatMode) return { maxAbsDayNet: 0, maxAbsWeekNet: 0 }
     const dayNet = new Map<string, number>()
     for (const t of group.transactions) {
+      if (t.recurring_expense_id) continue
       dayNet.set(t.date, (dayNet.get(t.date) ?? 0) + Number(t.amount))
     }
     const maxAbsDayNet = Math.max(0, ...[...dayNet.values()].map((n) => Math.abs(n)))
-    const maxAbsWeekNet = Math.max(0, ...group.weeks.map((w) => Math.abs(w.net)))
+    const maxAbsWeekNet = Math.max(0, ...group.weeks.map((w) => Math.abs(w.heatNet)))
     return { maxAbsDayNet, maxAbsWeekNet }
   }, [group.transactions, group.weeks, heatMode])
 
@@ -777,6 +1043,9 @@ export function Ledger({
           .slice()
           .sort((a, b) => a.date.localeCompare(b.date))
         const net = txs.reduce((acc, t) => acc + Number(t.amount), 0)
+        const heatNet = txs
+          .filter((t) => !t.recurring_expense_id)
+          .reduce((acc, t) => acc + Number(t.amount), 0)
         const opening = running
         const closing = opening + net
         running = closing
@@ -789,6 +1058,7 @@ export function Ledger({
           expenses: txs.filter((t) => Number(t.amount) < 0),
           opening,
           net,
+          heatNet,
           closing,
         }
       })
