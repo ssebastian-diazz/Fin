@@ -127,80 +127,8 @@ function TxChip({
   )
 }
 
-/** Lista de chips que pagina en vez de hacer scroll interno: el scroll vertical
- * dentro de una columna le roba el gesto de rueda al desplazamiento horizontal
- * entre meses, que es más importante. Si no caben todos, muestra una página a
- * la vez con una flecha para pasar a la siguiente. */
-function PagedChips({
-  transactions,
-  catById,
-  onEditTransaction,
-  onMove,
-  minHeightPx,
-  className = '',
-}: {
-  transactions: Transaction[]
-  catById: Map<string, Category>
-  onEditTransaction: (tx: Transaction) => void
-  onMove: (id: string, newDate: string) => void
-  minHeightPx: number
-  className?: string
-}) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(Math.max(1, transactions.length))
-
-  useLayoutEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-    function recompute() {
-      if (!container || transactions.length === 0) return
-      const first = container.firstElementChild as HTMLElement | null
-      if (!first) return
-      const chipHeight = first.getBoundingClientRect().height + 4 // mb-1
-      const available = container.clientHeight
-      const capacity = Math.max(1, Math.floor(available / chipHeight))
-      setPageSize(transactions.length <= capacity ? transactions.length : Math.max(1, capacity - 1))
-    }
-    recompute()
-    const ro = new ResizeObserver(recompute)
-    ro.observe(container)
-    return () => ro.disconnect()
-  }, [transactions.length])
-
-  const totalPages = Math.max(1, Math.ceil(transactions.length / pageSize))
-  const safePage = page >= totalPages ? 0 : page
-  const visible = transactions.slice(safePage * pageSize, safePage * pageSize + pageSize)
-
-  return (
-    <div ref={containerRef} className={`flex-1 overflow-hidden ${className}`} style={{ minHeight: minHeightPx }}>
-      {visible.map((tx) => (
-        <TxChip
-          key={tx.id}
-          tx={tx}
-          cat={catById.get(tx.category_id ?? '')}
-          onEdit={() => onEditTransaction(tx)}
-          onMove={(dir) => onMove(tx.id, shiftISO(tx.date, dir))}
-        />
-      ))}
-      {totalPages > 1 && (
-        <button
-          type="button"
-          onClick={() => setPage((p) => (p + 1) % totalPages)}
-          aria-label={`Ver más transacciones, página ${((safePage + 1) % totalPages) + 1} de ${totalPages}`}
-          className="w-full flex items-center justify-center gap-1 font-data text-[10px] text-ink-faint tabular-nums hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
-        >
-          <ChevronDown size={9} strokeWidth={2.8} />
-          {safePage + 1}/{totalPages}
-        </button>
-      )}
-    </div>
-  )
-}
-
-/** Como PagedChips pero sin paginado: se renderizan todas las transacciones
- * de corrido, sin recorte ni scroll propio, así que la columna que la
- * contiene crece con el contenido en vez de ciclar páginas con una flecha. */
+/** Todas las transacciones de corrido, sin recorte ni scroll propio, así que
+ * la columna que la contiene crece con el contenido en vez de paginar. */
 function ChipStack({
   transactions,
   catById,
@@ -910,6 +838,8 @@ function DayBreakout({
           const dayTx = byDay.get(d) ?? []
           const income = dayTx.filter((t) => Number(t.amount) > 0)
           const expenses = dayTx.filter((t) => Number(t.amount) < 0)
+          const sortedIncome = sortByCategoryOrder(aggregateByCategory(income, () => true), income)
+          const sortedExpenses = sortByCategoryOrder(aggregateByCategory(expenses, () => true), expenses)
           const isToday = d === today
           const stats = dayStats.get(d)!
           // En modo calor el subtotal de abajo deja de ser el saldo acumulado
@@ -997,21 +927,19 @@ function DayBreakout({
                 />
               ) : (
                 <>
-                  <PagedChips
-                    transactions={income}
+                  <ChipStack
+                    transactions={sortedIncome}
                     catById={catById}
                     onEditTransaction={onEditTransaction}
                     onMove={onMove}
-                    minHeightPx={24}
                     className="px-1 pt-1"
                   />
                   <div className="shrink-0 border-t border-line-soft/70" />
-                  <PagedChips
-                    transactions={expenses}
+                  <ChipStack
+                    transactions={sortedExpenses}
                     catById={catById}
                     onEditTransaction={onEditTransaction}
                     onMove={onMove}
-                    minHeightPx={24}
                     className="px-1 pt-1 pb-1"
                   />
                 </>
