@@ -42,17 +42,6 @@ function CategoryDot({ cat }: { cat: Category | undefined }) {
   )
 }
 
-function CategoryChip({ cat }: { cat: Category | undefined }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 min-w-0 max-w-[110px]">
-      <CategoryDot cat={cat} />
-      <span className={`text-xs truncate ${cat ? 'text-ink-soft' : 'text-ink-faint italic'}`}>
-        {cat ? cat.name : 'Sin cat.'}
-      </span>
-    </span>
-  )
-}
-
 /** Payload de arrastre de un chip: id de la transacción + su fecha original, para saber si el drop es un no-op. */
 function parseDragPayload(e: React.DragEvent): { id: string; date: string } | null {
   try {
@@ -245,7 +234,9 @@ interface MonthGroup {
   transactions: Transaction[]
 }
 
-/** Mes colapsado: una sola columna con la T resumida por categoría — cada chip es la suma del mes, no una transacción. */
+/** Mes colapsado: una sola columna con un anillo de Ingresos y otro de Gastos,
+ * cada uno a nivel de categoría — sin bajar a transacción por transacción,
+ * sería demasiado detalle para un mes entero. */
 function MonthSummaryColumn({
   transactions,
   opening,
@@ -259,6 +250,8 @@ function MonthSummaryColumn({
 }) {
   const incomeRows = useMemo(() => aggregateByCategory(transactions, (n) => n > 0), [transactions])
   const expenseRows = useMemo(() => aggregateByCategory(transactions, (n) => n < 0), [transactions])
+  const incomeTotal = useMemo(() => incomeRows.reduce((acc, r) => acc + Math.abs(r.total), 0), [incomeRows])
+  const expenseTotal = useMemo(() => expenseRows.reduce((acc, r) => acc + Math.abs(r.total), 0), [expenseRows])
   const positive = closing >= 0
 
   return (
@@ -269,29 +262,19 @@ function MonthSummaryColumn({
       <div className="font-data text-xs font-semibold text-ink-soft text-center tabular-nums pt-1.5 pb-1">
         {money(opening)}
       </div>
-      <div className="px-1.5 pb-1 min-h-[22px] space-y-0.5">
+      <div className="px-1.5 py-1.5 min-h-[22px]">
         {incomeRows.length === 0 ? (
           <p className="text-xs text-ink-faint italic text-center py-1">Sin ingresos</p>
         ) : (
-          incomeRows.map((r) => (
-            <div key={r.catId ?? '__none__'} className="flex items-center justify-between gap-2">
-              <CategoryChip cat={r.catId ? catById.get(r.catId) : undefined} />
-              <span className="font-data text-xs text-income tabular-nums shrink-0">{money(r.total)}</span>
-            </div>
-          ))
+          <CategoryRingLegend rows={incomeRows} total={incomeTotal} tone="income" catById={catById} layout="column" />
         )}
       </div>
       <div className="border-t border-line-soft" />
-      <div className="px-1.5 pt-1 pb-1.5 min-h-[22px] space-y-0.5">
+      <div className="px-1.5 py-1.5 min-h-[22px]">
         {expenseRows.length === 0 ? (
           <p className="text-xs text-ink-faint italic text-center py-1">Sin gastos</p>
         ) : (
-          expenseRows.map((r) => (
-            <div key={r.catId ?? '__none__'} className="flex items-center justify-between gap-2">
-              <CategoryChip cat={r.catId ? catById.get(r.catId) : undefined} />
-              <span className="font-data text-xs text-expense tabular-nums shrink-0">{money(r.total)}</span>
-            </div>
-          ))
+          <CategoryRingLegend rows={expenseRows} total={expenseTotal} tone="expense" catById={catById} layout="column" />
         )}
       </div>
       <div
@@ -493,9 +476,54 @@ function TxDetailRow({
   )
 }
 
-/** Anillo + leyenda de una sola dirección (ingresos o gastos) del día, cada
- * fila con su porcentaje del total, categoría y monto — ej. "50% Renta ($5,000)" —
- * y debajo, el desglose particular: cada transacción con su descripción y monto. */
+/** Anillo + leyenda de una sola dirección (ingresos o gastos): cada fila con
+ * su porcentaje del total, categoría y monto — ej. "50% Renta ($5,000)".
+ * Sin transacción por transacción — sólo el nivel de categoría, reusado tanto
+ * en el detalle de un día como en el resumen colapsado de un mes. */
+function CategoryRingLegend({
+  rows,
+  total,
+  tone,
+  catById,
+  layout = 'row',
+}: {
+  rows: { catId: string | null; total: number }[]
+  total: number
+  tone: 'income' | 'expense'
+  catById: Map<string, Category>
+  /** 'row': anillo a la izquierda, leyenda al lado (columnas anchas, ej. el día
+   * ampliado). 'column': anillo arriba centrado, leyenda abajo a todo lo ancho
+   * — para columnas angostas como el mes colapsado, donde lado a lado no le
+   * deja aire al texto. */
+  layout?: 'row' | 'column'
+}) {
+  return (
+    <div className={layout === 'row' ? 'flex items-center gap-2.5' : 'flex flex-col items-center gap-2'}>
+      <CategoryRing rows={rows} total={total} catById={catById} />
+      <div className={layout === 'row' ? 'flex-1 min-w-0 space-y-1' : 'w-full min-w-0 space-y-1'}>
+        {rows.map((r) => {
+          const pct = total > 0 ? Math.round((Math.abs(r.total) / total) * 100) : 0
+          const cat = r.catId ? catById.get(r.catId) : undefined
+          return (
+            <div key={r.catId ?? '__none__'} className="flex items-center gap-1.5 min-w-0">
+              <CategoryDot cat={cat} />
+              <span className={`text-[11px] truncate flex-1 ${cat ? 'text-ink-soft' : 'text-ink-faint italic'}`}>
+                {pct}% {cat ? cat.name : 'Sin cat.'}
+              </span>
+              <span className={`font-data text-[11px] tabular-nums shrink-0 ${tone === 'income' ? 'text-income' : 'text-expense'}`}>
+                {money(r.total)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** CategoryRingLegend de un día, con el desglose particular debajo: cada
+ * transacción con su descripción y monto — el mes no lo usa, sería demasiado
+ * detalle, pero un día sí cabe entero. */
 function CategoryRingBlock({
   label,
   rows,
@@ -528,26 +556,7 @@ function CategoryRingBlock({
   return (
     <div>
       <h3 className="text-[9px] font-semibold text-ink-faint uppercase tracking-[0.06em] mb-1.5">{label}</h3>
-      <div className="flex items-center gap-2.5">
-        <CategoryRing rows={rows} total={total} catById={catById} />
-        <div className="flex-1 min-w-0 space-y-1">
-          {rows.map((r) => {
-            const pct = total > 0 ? Math.round((Math.abs(r.total) / total) * 100) : 0
-            const cat = r.catId ? catById.get(r.catId) : undefined
-            return (
-              <div key={r.catId ?? '__none__'} className="flex items-center gap-1.5 min-w-0">
-                <CategoryDot cat={cat} />
-                <span className={`text-[11px] truncate flex-1 ${cat ? 'text-ink-soft' : 'text-ink-faint italic'}`}>
-                  {pct}% {cat ? cat.name : 'Sin cat.'}
-                </span>
-                <span className={`font-data text-[11px] tabular-nums shrink-0 ${tone === 'income' ? 'text-income' : 'text-expense'}`}>
-                  {money(r.total)}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      <CategoryRingLegend rows={rows} total={total} tone={tone} catById={catById} />
       {sortedTx.length > 0 && (
         <div className="mt-2 pt-2 border-t border-line-soft/70 space-y-0.5">
           {sortedTx.map((tx) => (
