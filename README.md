@@ -1,50 +1,51 @@
-# FinTrack — App personal de finanzas
+# FinTrack — Personal Finance App
 
-Demo pública de una app de finanzas personales de un solo usuario (single-user). Se se navega por día, semana o mes, con saldo corrido real,
-recurrentes, y una pestaña de estadísticas con desglose por categoría y
-fijo-vs-variable. Frontend en React + Vite + Tailwind.
+Public demo of a single-user personal finance app. Navigate by day, week, or
+month, with a real running balance, recurring transactions, and a statistics
+tab with a breakdown by category and fixed-vs-variable. Frontend built with
+React + Vite + Tailwind.
 
-**Esta demo no tiene backend.** Los datos que ves son ficticios y se generan
-y guardan en el `localStorage` de tu propio navegador la primera vez que
-cargas la página — cada visitante ve su propia copia, editable, que no
-persiste entre visitantes ni dispositivos y no se envía a ningún servidor.
+**This demo has no backend.** The data you see is fictitious and is
+generated and stored in your own browser's `localStorage` the first time you
+load the page — each visitor sees their own editable copy, which doesn't
+persist across visitors or devices and is never sent to any server.
 
-## Uso
+## Usage
 
-- **Calendario**: la T de mayor — cada mes se puede colapsar a un resumen por
-  categoría o expandir a semanas, y cada semana a días. Navega con las flechas
-  o el botón "Hoy".
-- **+ Transacción**: captura rápida — monto, descripción, categoría, fecha, y
-  si es recurrente, frecuencia + fecha de fin.
-- Arrastra una transacción a otro día/semana, o usa las flechas que aparecen
-  al pasar el cursor para moverla un día a la vez.
-- **Estadísticas**: gastos por categoría y fijo vs. variable, con switches
-  para ver el período por mes o por semana, y los valores en porcentaje o en
-  monto total.
-- **Ajustes** (ícono de tuerca): color de resaltado del período actual, y el
-  modo "Gastos relativos" — colorea cada día/semana según qué tan fuerte fue
-  su balance frente al resto del mes.
+- **Calendar**: the ledger view — each month can be collapsed into a
+  category summary or expanded into weeks, and each week into days. Navigate
+  with the arrows or the "Today" button.
+- **+ Transaction**: quick capture — amount, description, category, date,
+  and if recurring, frequency + end date.
+- Drag a transaction to another day/week, or use the arrows that appear on
+  hover to move it one day at a time.
+- **Statistics**: spending by category and fixed vs. variable, with toggles
+  to view the period by month or by week, and values as a percentage or a
+  total amount.
+- **Settings** (gear icon): highlight color for the current period, and
+  "Relative spending" mode — colors each day/week by how strong its balance
+  was relative to the rest of the month.
 
-## Correr este proyecto localmente
+## Running this project locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abre `http://localhost:5173`. Al primer load se siembran datos ficticios en
-`localStorage`; bórralos desde las herramientas de desarrollador del
-navegador (`localStorage.removeItem('fintrack-demo-v1')`) para reiniciar la
-demo desde cero.
+Open `http://localhost:5173`. Fictitious data is seeded into `localStorage`
+on first load; clear it from your browser's developer tools
+(`localStorage.removeItem('fintrack-demo-v1')`) to reset the demo from
+scratch.
 
-**Nota sobre el saldo inicial:** el saldo corrido suma todas las
-transacciones desde el principio. Para arrancar desde cero, registra una
-transacción única llamada "Saldo inicial" fechada hoy con el monto que
-quieras usar como punto de partida.
+**Note on the opening balance:** the running balance sums every transaction
+from the start. To start from zero, log a single transaction called
+"Opening balance" dated today with the amount you want to use as your
+starting point.
 
-## Publicar en GitHub Pages
+## Publishing to GitHub Pages
 
-1. **Settings → Pages** → fuente "GitHub Actions".
-2. Si el repo no se llama `FinTrack`, edita `base` en `vite.config.ts` para
-   que coincida (`/tu-repo/`).
-3. Push a `main` — `.github/workflows/deploy.yml` construye y despliega.
+1. **Settings → Pages** → source "GitHub Actions".
+2. If the repo isn't named `FinTrack`, edit `base` in `vite.config.ts` to
+   match (`/your-repo/`).
+3. Push to `main` — `.github/workflows/deploy.yml` builds and deploys it.
