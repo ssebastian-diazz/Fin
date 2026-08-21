@@ -23,6 +23,7 @@ const money = (n: number) =>
 export const LEFT_BOUND = '2026-01-01'
 export const BASE_RIGHT_YEAR = 2027
 const WEEK_COL_WIDTH = 116
+const WEEK_COL_EXPANDED_WIDTH = 260
 const DAY_COL_WIDTH = 92
 const DAY_COL_EXPANDED_WIDTH = 260
 const MONTH_SUMMARY_WIDTH = 208
@@ -319,7 +320,11 @@ function WeekColumn({
   const endDay = parseISO(week.end).getUTCDate()
   const rangeLabel = startDay === endDay ? String(startDay) : `${startDay}–${endDay}`
   const [dragOver, setDragOver] = useState(false)
-  const heatBg = heatMode ? heatBackground(week.heatNet, monthMaxAbsWeekNet) : undefined
+  // Igual que el día: en vez de navegar a otra vista, la columna se ensancha
+  // in-place para mostrar el desglose por anillos de toda la semana.
+  const [ringExpanded, setRingExpanded] = useState(false)
+  useEscapeClose(ringExpanded, () => setRingExpanded(false))
+  const heatBg = heatMode && !ringExpanded ? heatBackground(week.heatNet, monthMaxAbsWeekNet) : undefined
   // En modo calor las filas internas dejan su propio fondo opaco para que el
   // tinte de "qué tan fuerte fue la semana" se vea de corrido en todo el recuadro.
   const rowBgClass = heatMode ? '' : 'bg-panel'
@@ -334,10 +339,13 @@ function WeekColumn({
 
   return (
     <div
-      className={`group relative shrink-0 self-stretch flex flex-col rounded-none border overflow-hidden transition-colors ${
+      className={`group relative shrink-0 self-stretch flex flex-col rounded-none border overflow-hidden transition-[width,background-color] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${
         dragOver ? 'border-accent bg-accent-dim/40' : isCurrent ? 'border-ink-faint' : 'border-line'
-      }`}
-      style={{ width: WEEK_COL_WIDTH, backgroundColor: !dragOver ? heatBg : undefined }}
+      } ${ringExpanded ? 'shadow-[inset_0_0_0_1px_var(--color-accent)] z-[1]' : ''}`}
+      style={{
+        width: ringExpanded ? WEEK_COL_EXPANDED_WIDTH : WEEK_COL_WIDTH,
+        backgroundColor: !dragOver ? heatBg : undefined,
+      }}
       onDragOver={(e) => {
         e.preventDefault()
         setDragOver(true)
@@ -356,37 +364,77 @@ function WeekColumn({
       >
         <Plus size={11} strokeWidth={2.6} />
       </button>
-      <button
-        onClick={onExpand}
-        title="Ver por día"
-        aria-label={`Ver ${rangeLabel} por día`}
-        className={`w-full flex items-center justify-between gap-1 px-1.5 py-2 border-b border-line-soft hover:bg-panel-raised/60 transition-colors focus-visible:outline-none ${
+      {!ringExpanded && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setRingExpanded(true)
+          }}
+          title="Ver el desglose de la semana"
+          aria-label={`Ver el desglose de la semana ${rangeLabel}`}
+          className="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full bg-panel-raised border border-line flex items-center justify-center text-ink-faint opacity-0 group-hover:opacity-100 hover:text-accent hover:border-accent transition-all focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+        >
+          <Maximize2 size={11} strokeWidth={2.6} />
+        </button>
+      )}
+      <div
+        className={`shrink-0 flex items-center border-b border-line-soft ${
           heatMode ? '' : isCurrent ? 'bg-now' : 'bg-panel'
         } ${heatMode && isCurrent ? 'ring-1 ring-inset ring-ink-faint' : ''}`}
       >
-        <span className={`font-data text-xs ${isCurrent ? 'font-bold text-ink' : 'text-ink-soft'}`}>{rangeLabel}</span>
-        <ChevronRight size={10} strokeWidth={2.4} className="text-ink-faint" />
-      </button>
+        <button
+          onClick={onExpand}
+          title="Ver por día"
+          aria-label={`Ver ${rangeLabel} por día`}
+          className="flex-1 min-w-0 flex items-center justify-between gap-1 px-1.5 py-2 hover:bg-panel-raised/60 transition-colors focus-visible:outline-none"
+        >
+          <span className={`font-data text-xs truncate ${isCurrent ? 'font-bold text-ink' : 'text-ink-soft'}`}>
+            {rangeLabel}
+          </span>
+          <ChevronRight size={10} strokeWidth={2.4} className="text-ink-faint shrink-0" />
+        </button>
+        {ringExpanded && (
+          <button
+            onClick={() => setRingExpanded(false)}
+            title="Cerrar"
+            aria-label={`Cerrar el desglose de la semana ${rangeLabel}`}
+            className="shrink-0 flex items-center justify-center w-8 h-8 mr-0.5 text-ink-faint hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+          >
+            <Minimize2 size={11} strokeWidth={2.6} />
+          </button>
+        )}
+      </div>
       <div className={`shrink-0 px-1 pt-1 text-center font-data text-xs font-semibold text-ink-soft tabular-nums ${rowBgClass}`}>
         {money(week.opening)}
       </div>
-      <PagedChips
-        transactions={week.income}
-        catById={catById}
-        onEditTransaction={onEditTransaction}
-        onMove={onMove}
-        minHeightPx={26}
-        className={`px-1 pt-1 ${rowBgClass}`}
-      />
-      <div className="shrink-0 border-t border-line-soft" />
-      <PagedChips
-        transactions={week.expenses}
-        catById={catById}
-        onEditTransaction={onEditTransaction}
-        onMove={onMove}
-        minHeightPx={26}
-        className={`px-1 pt-1 pb-1 ${rowBgClass}`}
-      />
+      {ringExpanded ? (
+        <ExpandedRingContent
+          income={week.income}
+          expenses={week.expenses}
+          catById={catById}
+          onEditTransaction={onEditTransaction}
+        />
+      ) : (
+        <>
+          <PagedChips
+            transactions={week.income}
+            catById={catById}
+            onEditTransaction={onEditTransaction}
+            onMove={onMove}
+            minHeightPx={26}
+            className={`px-1 pt-1 ${rowBgClass}`}
+          />
+          <div className="shrink-0 border-t border-line-soft" />
+          <PagedChips
+            transactions={week.expenses}
+            catById={catById}
+            onEditTransaction={onEditTransaction}
+            onMove={onMove}
+            minHeightPx={26}
+            className={`px-1 pt-1 pb-1 ${rowBgClass}`}
+          />
+        </>
+      )}
       <div
         title={heatMode ? 'Balance de la semana' : 'Saldo final de la semana'}
         className={`shrink-0 font-data text-xs text-center tabular-nums py-1 border-t border-line-soft ${
@@ -573,10 +621,11 @@ function CategoryRingBlock({
   )
 }
 
-/** Contenido de un día ampliado: en vez de la lista de transacciones, un
- * anillo por categoría (ingresos y/o gastos) — el desglose proporcional del
- * día de un vistazo — y debajo, el desglose particular por transacción. */
-function DayExpandedContent({
+/** Contenido de un día o semana ampliados: en vez de la lista de
+ * transacciones, un anillo por categoría (ingresos y/o gastos) — el
+ * desglose proporcional del período de un vistazo — y debajo, el desglose
+ * particular por transacción. Mismo componente para ambos períodos. */
+function ExpandedRingContent({
   income,
   expenses,
   catById,
@@ -818,7 +867,7 @@ function DayBreakout({
                 {money(stats.opening)}
               </div>
               {isExpanded ? (
-                <DayExpandedContent
+                <ExpandedRingContent
                   income={income}
                   expenses={expenses}
                   catById={catById}
